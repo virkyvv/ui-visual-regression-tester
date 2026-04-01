@@ -1541,17 +1541,12 @@ function AppContent() {
                             <div className="space-y-2">
                               <h4 className="text-sm font-medium text-slate-700">设计稿</h4>
                               <div 
-                                ref={(el) => {
-                                  if (el) {
-                                    el.dataset.scrollPartner = `diff-${task.id}`;
-                                  }
-                                }}
+                                id={`design-scroll-${task.id}`}
                                 className="max-h-[400px] overflow-y-auto rounded-lg border border-slate-200"
                                 style={{ scrollBehavior: 'auto' }}
                                 onScroll={(e) => {
                                   const target = e.currentTarget;
-                                  const partnerId = `diff-${task.id}`;
-                                  const partner = document.querySelector(`[data-scroll-partner="${partnerId}"]`) as HTMLElement;
+                                  const partner = document.getElementById(`diff-scroll-${task.id}`) as HTMLElement;
                                   if (partner) {
                                     partner.scrollTop = target.scrollTop;
                                   }
@@ -1575,17 +1570,12 @@ function AppContent() {
                             <div className="space-y-2">
                               <h4 className="text-sm font-medium text-slate-700">差异标注</h4>
                               <div 
-                                ref={(el) => {
-                                  if (el) {
-                                    el.dataset.scrollPartner = `design-${task.id}`;
-                                  }
-                                }}
+                                id={`diff-scroll-${task.id}`}
                                 className="max-h-[400px] overflow-y-auto rounded-lg border border-slate-200"
                                 style={{ scrollBehavior: 'auto' }}
                                 onScroll={(e) => {
                                   const target = e.currentTarget;
-                                  const partnerId = `design-${task.id}`;
-                                  const partner = document.querySelector(`[data-scroll-partner="${partnerId}"]`) as HTMLElement;
+                                  const partner = document.getElementById(`design-scroll-${task.id}`) as HTMLElement;
                                   if (partner) {
                                     partner.scrollTop = target.scrollTop;
                                   }
@@ -1764,17 +1754,12 @@ function AppContent() {
                                           <div className="space-y-2">
                                             <h4 className="text-sm font-medium text-slate-700">设计稿</h4>
                                             <div 
-                                              ref={(el) => {
-                                                if (el) {
-                                                  el.dataset.scrollPartner = `diff-${subTask.id}`;
-                                                }
-                                              }}
+                                              id={`batch-design-scroll-${subTask.id}`}
                                               className="max-h-[400px] overflow-y-auto rounded-lg border border-slate-200"
                                               style={{ scrollBehavior: 'auto' }}
                                               onScroll={(e) => {
                                                 const target = e.currentTarget;
-                                                const partnerId = `diff-${subTask.id}`;
-                                                const partner = document.querySelector(`[data-scroll-partner="${partnerId}"]`) as HTMLElement;
+                                                const partner = document.getElementById(`batch-diff-scroll-${subTask.id}`) as HTMLElement;
                                                 if (partner) {
                                                   partner.scrollTop = target.scrollTop;
                                                 }
@@ -1796,17 +1781,12 @@ function AppContent() {
                                           <div className="space-y-2">
                                             <h4 className="text-sm font-medium text-slate-700">差异标注</h4>
                                             <div 
-                                              ref={(el) => {
-                                                if (el) {
-                                                  el.dataset.scrollPartner = `design-${subTask.id}`;
-                                                }
-                                              }}
+                                              id={`batch-diff-scroll-${subTask.id}`}
                                               className="max-h-[400px] overflow-y-auto rounded-lg border border-slate-200"
                                               style={{ scrollBehavior: 'auto' }}
                                               onScroll={(e) => {
                                                 const target = e.currentTarget;
-                                                const partnerId = `design-${subTask.id}`;
-                                                const partner = document.querySelector(`[data-scroll-partner="${partnerId}"]`) as HTMLElement;
+                                                const partner = document.getElementById(`batch-design-scroll-${subTask.id}`) as HTMLElement;
                                                 if (partner) {
                                                   partner.scrollTop = target.scrollTop;
                                                 }
