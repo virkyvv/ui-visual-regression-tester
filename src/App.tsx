@@ -101,18 +101,21 @@ function AppContent() {
   // 拖拽处理函数
   const handleDragOver = (e: React.DragEvent, target: 'design' | 'dev') => {
     e.preventDefault();
+    e.stopPropagation();
     setIsDragging(true);
     setDragTarget(target);
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setIsDragging(false);
     setDragTarget(null);
   };
 
   const handleDrop = (e: React.DragEvent, target: 'design' | 'dev') => {
     e.preventDefault();
+    e.stopPropagation();
     setIsDragging(false);
     setDragTarget(null);
 
@@ -1205,6 +1208,8 @@ function AppContent() {
                   onDragOver={(e) => handleDragOver(e, 'design')}
                   onDragLeave={handleDragLeave}
                   onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
                     // 处理批量文件夹上传
                     const files = e.dataTransfer.files;
                     if (files && files.length > 0) {
@@ -1237,9 +1242,28 @@ function AppContent() {
                   {batchDesignImages.length > 0 && (
                     <div className="space-y-2">
                       <p className="text-sm text-slate-600">已上传 {batchDesignImages.length} 张图片:</p>
-                      <div className="max-h-32 overflow-y-auto space-y-1 text-xs">
+                      <div className="grid grid-cols-4 gap-2 max-h-[280px] overflow-y-auto p-2 bg-slate-50 rounded-lg">
                         {batchDesignImages.map((img, idx) => (
-                          <div key={idx} className="p-2 bg-slate-50 rounded">{img.name}</div>
+                          <div key={idx} className="relative group aspect-square">
+                            <img
+                              src={img.data}
+                              alt={img.name}
+                              className="w-full h-full object-cover rounded border border-slate-200"
+                              title={img.name}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setBatchDesignImages(prev => prev.filter((_, i) => i !== idx));
+                              }}
+                              className="absolute top-1 right-1 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600"
+                              title="删除图片"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M18 6L6 18M6 6l12 12"></path>
+                              </svg>
+                            </button>
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -1256,6 +1280,8 @@ function AppContent() {
                   onDragOver={(e) => handleDragOver(e, 'dev')}
                   onDragLeave={handleDragLeave}
                   onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
                     const files = e.dataTransfer.files;
                     if (files && files.length > 0) {
                       handleBatchFolderUpload(files, 'dev');
@@ -1287,9 +1313,28 @@ function AppContent() {
                   {batchDevImages.length > 0 && (
                     <div className="space-y-2">
                       <p className="text-sm text-slate-600">已上传 {batchDevImages.length} 张图片:</p>
-                      <div className="max-h-32 overflow-y-auto space-y-1 text-xs">
+                      <div className="grid grid-cols-4 gap-2 max-h-[280px] overflow-y-auto p-2 bg-slate-50 rounded-lg">
                         {batchDevImages.map((img, idx) => (
-                          <div key={idx} className="p-2 bg-slate-50 rounded">{img.name}</div>
+                          <div key={idx} className="relative group aspect-square">
+                            <img
+                              src={img.data}
+                              alt={img.name}
+                              className="w-full h-full object-cover rounded border border-slate-200"
+                              title={img.name}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setBatchDevImages(prev => prev.filter((_, i) => i !== idx));
+                              }}
+                              className="absolute top-1 right-1 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600"
+                              title="删除图片"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M18 6L6 18M6 6l12 12"></path>
+                              </svg>
+                            </button>
+                          </div>
                         ))}
                       </div>
                     </div>
