@@ -1,5 +1,5 @@
 // 图像对比核心算法
-import type { PixelDiffResult, DiffRegion, DiffSeverity } from '@/types';
+import type { PixelDiffResult, DiffRegion, DiffSeverity, DiffType } from '@/types';
 
 /**
  * 加载图片到 Canvas
@@ -52,6 +52,448 @@ function colorDistance(r1: number, g1: number, b1: number, r2: number, g2: numbe
 }
 
 /**
+ * 圆角检测：通过边缘曲率分析判断元素是否为圆角矩形
+ */
+function detectBorderRadius(
+  imageData: ImageData,
+  region: { minX: number; minY: number; maxX: number; maxY: number }
+): { hasBorderRadius: boolean; estimatedRadius: number; confidence: number } {
+  const width = region.maxX - region.minX + 1;
+  const height = region.maxY - region.minY + 1;
+  const data = imageData.data;
+
+  // 如果区域太小，无法检测
+  if (width < 20 || height < 20) {
+    return { hasBorderRadius: false, estimatedRadius: 0, confidence: 0 };
+  }
+
+  // 提取四个角区域的像素
+  const cornerSize = Math.min(width, height) / 4;
+  const corners = {
+    topLeft: { x: region.minX, y: region.minY, w: cornerSize, h: cornerSize },
+    topRight: { x: region.maxX - cornerSize, y: region.minY, w: cornerSize, h: cornerSize },
+    bottomLeft: { x: region.minX, y: region.maxY - cornerSize, w: cornerSize, h: cornerSize },
+    bottomRight: { x: region.maxX - cornerSize, y: region.maxY - cornerSize, w: cornerSize, h: cornerSize }
+  };
+
+  // 计算每个角的曲率
+  const cornerCurvatures = Object.entries(corners).map(([key, corner]) => {
+    let curvedPixels = 0;
+    let totalPixels = 0;
+
+    for (let dy = 0; dy < corner.h; dy++) {
+      for (let dx = 0; dx < corner.w; dx++) {
+        const x = Math.floor(corner.x + dx);
+        const y = Math.floor(corner.y + dy);
+        const idx = (y * imageData.width + x) * 4;
+
+        // 检查边缘像素
+        const isEdge = (
+          (dx === 0 || dy === 0) ||
+          (dx >= corner.w - 1 || dy >= corner.h - 1)
+        );
+
+        if (isEdge) {
+          totalPixels++;
+          // 检查该像素是否与其他边缘像素形成平滑曲线
+          const r = data[idx];
+          const g = data[idx + 1];
+          const b = data[idx + 2];
+          const a = data[idx + 3];
+
+          // 如果是透明或半透明，则认为是曲线
+          if (a < 255) {
+            curvedPixels++;
+          }
+        }
+      }
+    }
+
+    return curvedPixels / totalPixels;
+  });
+
+  // 计算平均曲率
+  const avgCurvature = cornerCurvatures.reduce((sum, c) => sum + c, 0) / cornerCurvatures.length;
+
+  // 判断是否有圆角
+  const hasBorderRadius = avgCurvature > 0.3;
+  const estimatedRadius = hasBorderRadius ? Math.round(avgCurvature * cornerSize) : 0;
+  const confidence = Math.min(1.0, avgCurvature + 0.2);
+
+  return { hasBorderRadius, estimatedRadius, confidence };
+}
+
+/**
+ * 颜色检测：通过颜色直方图分析判断颜色差异
+ */
+function detectColorDifference(
+  canvas1: HTMLCanvasElement,
+  canvas2: HTMLCanvasElement,
+  region: { minX: number; minY: number; maxX: number; maxY: number }
+): {
+  dominantColor1: { r: number; g: number; b: number };
+  dominantColor2: { r: number; g: number; b: number };
+  colorDistance: number;
+  hasSignificantDifference: boolean;
+  confidence: number;
+} {
+  const ctx1 = canvas1.getContext('2d');
+  const ctx2 = canvas2.getContext('2d');
+  if (!ctx1 || !ctx2) {
+    throw new Error('Failed to get canvas context');
+  }
+
+  const width = region.maxX - region.minX + 1;
+  const height = region.maxY - region.minY + 1;
+
+  const imageData1 = ctx1.getImageData(region.minX, region.minY, width, height);
+  const imageData2 = ctx2.getImageData(region.minX, region.minY, width, height);
+
+  const histogram1 = analyzeColorHistogram(imageData1.data);
+  const histogram2 = analyzeColorHistogram(imageData2.data);
+
+  const dominantColor1 = histogram1.dominant;
+  const dominantColor2 = histogram2.dominant;
+
+  const colorDistance = Math.sqrt(
+    Math.pow(dominantColor1.r - dominantColor2.r, 2) +
+    Math.pow(dominantColor1.g - dominantColor2.g, 2) +
+    Math.pow(dominantColor1.b - dominantColor2.b, 2)
+  );
+
+  const maxDistance = Math.sqrt(255 * 255 * 3);
+  const normalizedDistance = colorDistance / maxDistance;
+  const hasSignificantDifference = normalizedDistance > 0.2; // 超过20%差异认为显著
+  const confidence = Math.min(1.0, normalizedDistance * 2);
+
+  return {
+    dominantColor1,
+    dominantColor2,
+    colorDistance,
+    hasSignificantDifference,
+    confidence
+  };
+}
+
+/**
+ * 分析颜色直方图，找出主色调
+ */
+function analyzeColorHistogram(
+  data: Uint8ClampedArray
+): { dominant: { r: number; g: number; b: number }; histogram: Record<string, number> } {
+  const histogram: Record<string, number> = {};
+  let maxCount = 0;
+  let dominant = { r: 0, g: 0, b: 0 };
+
+  // 降低颜色精度以合并相似颜色
+  const quantization = 16; // 每16个色阶合并
+
+  for (let i = 0; i < data.length; i += 4) {
+    const r = Math.floor(data[i] / quantization) * quantization;
+    const g = Math.floor(data[i + 1] / quantization) * quantization;
+    const b = Math.floor(data[i + 2] / quantization) * quantization;
+    const a = data[i + 3];
+
+    if (a < 128) continue; // 忽略透明像素
+
+    const key = `${r},${g},${b}`;
+    histogram[key] = (histogram[key] || 0) + 1;
+
+    if (histogram[key] > maxCount) {
+      maxCount = histogram[key];
+      dominant = { r, g, b };
+    }
+  }
+
+  return { dominant, histogram };
+}
+
+/**
+ * 字号检测：通过文本区域识别和字体大小估算
+ */
+function detectFontSize(
+  canvas: HTMLCanvasElement,
+  region: { minX: number; minY: number; maxX: number; maxY: number }
+): { hasText: boolean; estimatedFontSize: number; confidence: number } {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Failed to get canvas context');
+  }
+
+  const width = region.maxX - region.minX + 1;
+  const height = region.maxY - region.minY + 1;
+
+  // 如果区域太大或太小，不太可能是文本
+  if (width > 500 || height > 100 || width < 10 || height < 10) {
+    return { hasText: false, estimatedFontSize: 0, confidence: 0 };
+  }
+
+  const imageData = ctx.getImageData(region.minX, region.minY, width, height);
+  const data = imageData.data;
+
+  // 分析垂直线条的间距，估算字号
+  const lineHeights: number[] = [];
+  let previousTextLine: number | null = null;
+
+  for (let y = 1; y < height - 1; y++) {
+    let textPixelsInLine = 0;
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+
+      // 假设文本是深色（黑色或深灰色）
+      if (r < 128 && g < 128 && b < 128) {
+        textPixelsInLine++;
+      }
+    }
+
+    // 如果这一行有超过20%的像素是文本像素
+    if (textPixelsInLine > width * 0.2) {
+      if (previousTextLine !== null) {
+        lineHeights.push(y - previousTextLine);
+      }
+      previousTextLine = y;
+    } else {
+      previousTextLine = null;
+    }
+  }
+
+  // 计算平均行高
+  const avgLineHeight = lineHeights.length > 0
+    ? lineHeights.reduce((sum, h) => sum + h, 0) / lineHeights.length
+    : 0;
+
+  // 字号通常是行高的80-90%
+  const estimatedFontSize = Math.round(avgLineHeight * 0.85);
+  const hasText = estimatedFontSize > 8 && estimatedFontSize < 72;
+  const confidence = hasText ? Math.min(1.0, lineHeights.length / 5) : 0;
+
+  return { hasText, estimatedFontSize, confidence };
+}
+
+/**
+ * 间距检测：测量元素间的距离
+ */
+function detectSpacing(
+  imageData: ImageData,
+  region1: { minX: number; minY: number; maxX: number; maxY: number },
+  region2: { minX: number; minY: number; maxX: number; maxY: number }
+): { spacing: number; isIrregular: boolean; confidence: number } {
+  // 计算两个区域之间的最小距离
+  const xDistance = Math.min(
+    Math.abs(region1.maxX - region2.minX),
+    Math.abs(region2.maxX - region1.minX)
+  );
+
+  const yDistance = Math.min(
+    Math.abs(region1.maxY - region2.minY),
+    Math.abs(region2.maxY - region1.minY)
+  );
+
+  // 取水平和垂直距离的较小值
+  const spacing = Math.min(xDistance, yDistance);
+
+  // 判断间距是否不规则（距离过小或过大）
+  const isIrregular = spacing < 5 || spacing > 50;
+  const confidence = isIrregular ? 0.8 : 0.3;
+
+  return { spacing, isIrregular, confidence };
+}
+
+/**
+ * 尺寸检测：对比元素宽高
+ */
+function detectSizeDifference(
+  canvas1: HTMLCanvasElement,
+  canvas2: HTMLCanvasElement,
+  region: { minX: number; minY: number; maxX: number; maxY: number }
+): {
+  width1: number; height1: number;
+  width2: number; height2: number;
+  widthDiff: number; heightDiff: number;
+  hasSignificantDifference: boolean;
+  confidence: number;
+} {
+  const width = region.maxX - region.minX + 1;
+  const height = region.maxY - region.minY + 1;
+
+  const ctx1 = canvas1.getContext('2d');
+  const ctx2 = canvas2.getContext('2d');
+  if (!ctx1 || !ctx2) {
+    throw new Error('Failed to get canvas context');
+  }
+
+  const imageData1 = ctx1.getImageData(region.minX, region.minY, width, height);
+  const imageData2 = ctx2.getImageData(region.minX, region.minY, width, height);
+
+  // 计算设计稿中的元素边界
+  const bounds1 = calculateElementBounds(imageData1.data, width, height);
+  const bounds2 = calculateElementBounds(imageData2.data, width, height);
+
+  const width1 = bounds1.maxX - bounds1.minX + 1;
+  const height1 = bounds1.maxY - bounds1.minY + 1;
+  const width2 = bounds2.maxX - bounds2.minX + 1;
+  const height2 = bounds2.maxY - bounds2.minY + 1;
+
+  const widthDiff = Math.abs(width1 - width2);
+  const heightDiff = Math.abs(height1 - height2);
+
+  const sizeRatio = Math.max(width1, height1) / Math.max(width2, height2);
+  const hasSignificantDifference = sizeRatio < 0.9 || sizeRatio > 1.1;
+  const confidence = Math.min(1.0, (sizeRatio - 0.9) * 5);
+
+  return {
+    width1, height1,
+    width2, height2,
+    widthDiff, heightDiff,
+    hasSignificantDifference,
+    confidence
+  };
+}
+
+/**
+ * 计算元素边界
+ */
+function calculateElementBounds(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number
+): { minX: number; minY: number; maxX: number; maxY: number } {
+  let minX = width, minY = height, maxX = 0, maxY = 0;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const a = data[idx + 3];
+
+      if (a > 128) { // 非透明像素
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+
+  return { minX, minY, maxX, maxY };
+}
+
+/**
+ * 分析差异区域的问题类型（基于新的五维检测方法）
+ */
+function classifyDiffType(
+  canvas1: HTMLCanvasElement,
+  canvas2: HTMLCanvasElement,
+  region: { minX: number; minY: number; maxX: number; maxY: number }
+): {
+  type: DiffType;
+  expectedValue: string;
+  actualValue: string;
+  deviation: string;
+  confidence: number;
+} {
+  const ctx1 = canvas1.getContext('2d');
+  const ctx2 = canvas2.getContext('2d');
+  if (!ctx1 || !ctx2) {
+    throw new Error('Failed to get canvas context');
+  }
+
+  const width = region.maxX - region.minX + 1;
+  const height = region.maxY - region.minY + 1;
+  const imageData1 = ctx1.getImageData(region.minX, region.minY, width, height);
+  const imageData2 = ctx2.getImageData(region.minX, region.minY, width, height);
+
+  // 1. 圆角检测
+  const borderRadius1 = detectBorderRadius(imageData1, region);
+  const borderRadius2 = detectBorderRadius(imageData2, region);
+
+  // 2. 颜色检测
+  const colorDiff = detectColorDifference(canvas1, canvas2, region);
+
+  // 3. 字号检测
+  const fontSize1 = detectFontSize(canvas1, region);
+  const fontSize2 = detectFontSize(canvas2, region);
+
+  // 4. 间距检测（需要两个区域，这里简化处理）
+  // 间距检测需要先识别相邻的元素，这里暂时跳过
+
+  // 5. 尺寸检测
+  const sizeDiff = detectSizeDifference(canvas1, canvas2, region);
+
+  // 综合判断差异类型
+  const detections: Array<{ type: string; confidence: number; description: string }> = [];
+
+  // 颜色差异
+  if (colorDiff.hasSignificantDifference && colorDiff.confidence > 0.5) {
+    detections.push({
+      type: 'color',
+      confidence: colorDiff.confidence,
+      description: `颜色差异：rgb(${colorDiff.dominantColor1.r},${colorDiff.dominantColor1.g},${colorDiff.dominantColor1.b}) → rgb(${colorDiff.dominantColor2.r},${colorDiff.dominantColor2.g},${colorDiff.dominantColor2.b})`
+    });
+  }
+
+  // 尺寸差异
+  if (sizeDiff.hasSignificantDifference && sizeDiff.confidence > 0.5) {
+    detections.push({
+      type: 'size',
+      confidence: sizeDiff.confidence,
+      description: `尺寸差异：${sizeDiff.width1}x${sizeDiff.height1} → ${sizeDiff.width2}x${sizeDiff.height2}`
+    });
+  }
+
+  // 圆角差异
+  if (borderRadius1.hasBorderRadius !== borderRadius2.hasBorderRadius) {
+    detections.push({
+      type: 'border-radius',
+      confidence: Math.max(borderRadius1.confidence, borderRadius2.confidence),
+      description: `圆角差异：${borderRadius1.hasBorderRadius ? `${borderRadius1.estimatedRadius}px` : '无'} → ${borderRadius2.hasBorderRadius ? `${borderRadius2.estimatedRadius}px` : '无'}`
+    });
+  }
+
+  // 字号差异
+  if (fontSize1.hasText && fontSize2.hasText && Math.abs(fontSize1.estimatedFontSize - fontSize2.estimatedFontSize) > 2) {
+    detections.push({
+      type: 'font-size',
+      confidence: Math.max(fontSize1.confidence, fontSize2.confidence),
+      description: `字号差异：${fontSize1.estimatedFontSize}px → ${fontSize2.estimatedFontSize}px`
+    });
+  }
+
+  // 如果没有检测到明显差异，判断为间距问题（基于长宽比）
+  if (detections.length === 0) {
+    const aspectRatio = width / height;
+    if (aspectRatio > 5 || aspectRatio < 0.2) {
+      detections.push({
+        type: 'spacing',
+        confidence: 0.75,
+        description: `间距异常：长宽比 ${aspectRatio.toFixed(2)}`
+      });
+    } else {
+      detections.push({
+        type: 'layout',
+        confidence: 0.6,
+        description: '布局差异'
+      });
+    }
+  }
+
+  // 选择置信度最高的检测结果
+  const bestDetection = detections.reduce((best, current) =>
+    current.confidence > best.confidence ? current : best
+  );
+
+  return {
+    type: bestDetection.type as any,
+    expectedValue: bestDetection.description,
+    actualValue: '实际实现值',
+    deviation: bestDetection.description,
+    confidence: bestDetection.confidence
+  };
+}
+
+/**
  * 比较两个 Canvas 的像素差异
  */
 function compareCanvases(
@@ -100,34 +542,208 @@ function compareCanvases(
 }
 
 /**
+ * 合并相邻的差异区域
+ */
+function mergeAdjacentRegions(
+  regions: DiffRegion[],
+  mergeDistance: number = 20
+): DiffRegion[] {
+  if (regions.length === 0) return regions;
+
+  const merged: DiffRegion[] = [];
+  const used = new Set<string>();
+
+  for (let i = 0; i < regions.length; i++) {
+    if (used.has(regions[i].id)) continue;
+
+    let currentRegion = { ...regions[i] };
+    used.add(currentRegion.id);
+
+    // 查找相邻的区域并合并
+    let foundMerge = true;
+    while (foundMerge) {
+      foundMerge = false;
+
+      for (let j = 0; j < regions.length; j++) {
+        if (used.has(regions[j].id)) continue;
+
+        const other = regions[j];
+
+        // 检查是否相邻（距离阈值内）
+        const distanceX = Math.min(
+          Math.abs(currentRegion.x - (other.x + other.width)),
+          Math.abs(other.x - (currentRegion.x + currentRegion.width))
+        );
+        const distanceY = Math.min(
+          Math.abs(currentRegion.y - (other.y + other.height)),
+          Math.abs(other.y - (currentRegion.y + currentRegion.height))
+        );
+
+        if (distanceX <= mergeDistance && distanceY <= mergeDistance) {
+          // 合并区域
+          const newX = Math.min(currentRegion.x, other.x);
+          const newY = Math.min(currentRegion.y, other.y);
+          const newWidth = Math.max(
+            currentRegion.x + currentRegion.width,
+            other.x + other.width
+          ) - newX;
+          const newHeight = Math.max(
+            currentRegion.y + currentRegion.height,
+            other.y + other.height
+          ) - newY;
+
+          // 合并设计稿位置（绿色框）
+          const newDesignCorrectX = Math.min(
+            currentRegion.designCorrectX!,
+            other.designCorrectX!
+          );
+          const newDesignCorrectY = Math.min(
+            currentRegion.designCorrectY!,
+            other.designCorrectY!
+          );
+          const newDesignCorrectWidth = Math.max(
+            currentRegion.designCorrectX! + currentRegion.designCorrectWidth!,
+            other.designCorrectX! + other.designCorrectWidth!
+          ) - newDesignCorrectX;
+          const newDesignCorrectHeight = Math.max(
+            currentRegion.designCorrectY! + currentRegion.designCorrectHeight!,
+            other.designCorrectY! + other.designCorrectHeight!
+          ) - newDesignCorrectY;
+
+          // 合并开发稿位置（红色框）
+          const newDevErrorX = Math.min(
+            currentRegion.devErrorX!,
+            other.devErrorX!
+          );
+          const newDevErrorY = Math.min(
+            currentRegion.devErrorY!,
+            other.devErrorY!
+          );
+          const newDevErrorWidth = Math.max(
+            currentRegion.devErrorX! + currentRegion.devErrorWidth!,
+            other.devErrorX! + other.devErrorWidth!
+          ) - newDevErrorX;
+          const newDevErrorHeight = Math.max(
+            currentRegion.devErrorY! + currentRegion.devErrorHeight!,
+            other.devErrorY! + other.devErrorHeight!
+          ) - newDevErrorY;
+
+          currentRegion = {
+            ...currentRegion,
+            id: currentRegion.id,
+            x: newX,
+            y: newY,
+            width: newWidth,
+            height: newHeight,
+            diffPixels: currentRegion.diffPixels + other.diffPixels,
+            affectedAreaPercentage: ((currentRegion.diffPixels + other.diffPixels) / (newWidth * newHeight)) * 100,
+
+            // 更新设计稿位置（绿色框）
+            designCorrectX: newDesignCorrectX,
+            designCorrectY: newDesignCorrectY,
+            designCorrectWidth: newDesignCorrectWidth,
+            designCorrectHeight: newDesignCorrectHeight,
+
+            // 更新开发稿位置（红色框）
+            devErrorX: newDevErrorX,
+            devErrorY: newDevErrorY,
+            devErrorWidth: newDevErrorWidth,
+            devErrorHeight: newDevErrorHeight
+          };
+
+          used.add(other.id);
+          foundMerge = true;
+        }
+      }
+    }
+
+    merged.push(currentRegion);
+  }
+
+  return merged;
+}
+
+/**
  * 连通区域检测算法（基于 BFS）
  */
 function findConnectedRegions(
   diffMap: Uint8Array,
   width: number,
   height: number,
+  designCanvas: HTMLCanvasElement,
+  devCanvas: HTMLCanvasElement,
   minRegionSize: number = 10
 ): DiffRegion[] {
   const visited = new Uint8Array(diffMap.length);
   const regions: DiffRegion[] = [];
   let regionId = 0;
 
+  // 获取设计稿和开发稿的缩放比例
+  const scaleX = designCanvas.width / width;
+  const scaleY = designCanvas.height / height;
+  const devScaleX = devCanvas.width / width;
+  const devScaleY = devCanvas.height / height;
+
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const idx = y * width + x;
       if (diffMap[idx] === 1 && visited[idx] === 0) {
         // 发现新的差异区域
-        const region = bfsRegion(diffMap, visited, width, height, x, y, regionId);
-        if (region.pixelCount >= minRegionSize) {
+        const regionData = bfsRegion(diffMap, visited, width, height, x, y, regionId);
+        if (regionData.pixelCount >= minRegionSize) {
+          // 分析差异类型
+          const typeInfo = classifyDiffType(designCanvas, devCanvas, {
+            minX: regionData.minX,
+            minY: regionData.minY,
+            maxX: regionData.maxX,
+            maxY: regionData.maxY
+          });
+
+          // 计算绿色框（设计稿正确位置）和红色框（开发稿错误位置）的坐标
+          // 这里使用原始 Canvas 的坐标，避免统一尺寸后的坐标混淆
+          const designCorrectX = Math.round(regionData.minX * scaleX);
+          const designCorrectY = Math.round(regionData.minY * scaleY);
+          const designCorrectWidth = Math.round((regionData.maxX - regionData.minX + 1) * scaleX);
+          const designCorrectHeight = Math.round((regionData.maxY - regionData.minY + 1) * scaleY);
+
+          const devErrorX = Math.round(regionData.minX * devScaleX);
+          const devErrorY = Math.round(regionData.minY * devScaleY);
+          const devErrorWidth = Math.round((regionData.maxX - regionData.minX + 1) * devScaleX);
+          const devErrorHeight = Math.round((regionData.maxY - regionData.minY + 1) * devScaleY);
+
           regions.push({
             id: `region-${regionId}`,
-            x: region.minX,
-            y: region.minY,
-            width: region.maxX - region.minX + 1,
-            height: region.maxY - region.minY + 1,
-            severity: calculateSeverity(region.pixelCount, width, height),
-            diffPixels: region.pixelCount,
-            affectedAreaPercentage: (region.pixelCount / (width * height)) * 100
+            x: regionData.minX,
+            y: regionData.minY,
+            width: regionData.maxX - regionData.minX + 1,
+            height: regionData.maxY - regionData.minY + 1,
+            severity: calculateSeverity(regionData.pixelCount, width, height),
+            diffPixels: regionData.pixelCount,
+            affectedAreaPercentage: (regionData.pixelCount / (width * height)) * 100,
+
+            // 新增字段
+            type: typeInfo.type,
+            position: `坐标(${regionData.minX}, ${regionData.minY})`,
+            expectedValue: typeInfo.expectedValue,
+            actualValue: typeInfo.actualValue,
+            deviation: typeInfo.deviation,
+            confidence: typeInfo.confidence,
+
+            // 设计稿中的正确位置（绿色框）- 使用原始 Canvas 坐标
+            designCorrectX,
+            designCorrectY,
+            designCorrectWidth,
+            designCorrectHeight,
+
+            // 开发稿中的错误位置（红色框）- 使用原始 Canvas 坐标
+            devErrorX,
+            devErrorY,
+            devErrorWidth,
+            devErrorHeight,
+            
+            // 记录标注图的原始尺寸（开发稿 canvas 尺寸）
+            canvasWidth: devCanvas.width,
+            canvasHeight: devCanvas.height
           });
         }
         regionId++;
@@ -135,7 +751,15 @@ function findConnectedRegions(
     }
   }
 
-  return regions;
+  // 合并相邻的区域
+  const mergedRegions = mergeAdjacentRegions(regions, 20);
+
+  // 重新计算合并后区域的严重程度
+  mergedRegions.forEach(region => {
+    region.severity = calculateSeverity(region.diffPixels, width, height);
+  });
+
+  return mergedRegions;
 }
 
 /**
@@ -202,34 +826,69 @@ function calculateSeverity(pixelCount: number, width: number, height: number): D
 }
 
 /**
- * 生成标注图（在原图上绘制红框）
+ * 生成标注图（在开发稿上同时绘制绿色框和红色框）
  */
 function generateAnnotatedImage(
-  originalCanvas: HTMLCanvasElement,
+  designCanvas: HTMLCanvasElement,
+  devCanvas: HTMLCanvasElement,
   regions: DiffRegion[]
 ): string {
+  // 创建与开发稿相同尺寸的画布
   const annotated = document.createElement('canvas');
-  annotated.width = originalCanvas.width;
-  annotated.height = originalCanvas.height;
+  annotated.width = devCanvas.width;
+  annotated.height = devCanvas.height;
   const ctx = annotated.getContext('2d');
   if (!ctx) {
     throw new Error('Failed to get canvas context');
   }
 
-  // 绘制原图
-  ctx.drawImage(originalCanvas, 0, 0);
+  // 绘制开发稿作为底图
+  ctx.drawImage(devCanvas, 0, 0);
+
+  // 计算设计稿到开发稿的缩放比例
+  const scaleX = devCanvas.width / designCanvas.width;
+  const scaleY = devCanvas.height / designCanvas.height;
 
   // 绘制差异区域标注
   regions.forEach(region => {
-    ctx.strokeStyle = getSeverityColor(region.severity);
-    ctx.lineWidth = Math.max(2, Math.min(5, region.width / 50));
-    ctx.strokeRect(region.x, region.y, region.width, region.height);
+    // 绿色框：标注设计稿中的正确位置（预期）- 需要映射到开发稿坐标系
+    if (region.designCorrectX !== undefined) {
+      // 将设计稿坐标映射到开发稿坐标系
+      const mappedX = Math.round(region.designCorrectX * scaleX);
+      const mappedY = Math.round(region.designCorrectY * scaleY);
+      const mappedWidth = Math.round(region.designCorrectWidth! * scaleX);
+      const mappedHeight = Math.round(region.designCorrectHeight! * scaleY);
 
-    // 添加半透明填充
-    ctx.fillStyle = getSeverityColor(region.severity);
-    ctx.globalAlpha = 0.2;
-    ctx.fillRect(region.x, region.y, region.width, region.height);
-    ctx.globalAlpha = 1.0;
+      ctx.strokeStyle = '#22C55E'; // 绿色
+      ctx.lineWidth = Math.max(2, Math.min(5, mappedWidth / 50));
+      ctx.strokeRect(mappedX, mappedY, mappedWidth, mappedHeight);
+
+      // 添加半透明绿色填充
+      ctx.fillStyle = '#22C55E';
+      ctx.globalAlpha = 0.15;
+      ctx.fillRect(mappedX, mappedY, mappedWidth, mappedHeight);
+      ctx.globalAlpha = 1.0;
+    }
+
+    // 红色框：标注开发稿中的实际位置（实际）
+    if (region.devErrorX !== undefined) {
+      ctx.strokeStyle = '#EF4444'; // 红色
+      ctx.lineWidth = Math.max(2, Math.min(5, region.devErrorWidth! / 50));
+      ctx.strokeRect(region.devErrorX, region.devErrorY, region.devErrorWidth!, region.devErrorHeight!);
+
+      // 添加半透明红色填充
+      ctx.fillStyle = '#EF4444';
+      ctx.globalAlpha = 0.15;
+      ctx.fillRect(region.devErrorX, region.devErrorY, region.devErrorWidth!, region.devErrorHeight!);
+      ctx.globalAlpha = 1.0;
+    }
+
+    // 添加区域编号（用于交互识别）
+    ctx.fillStyle = '#000000';
+    ctx.font = 'bold 12px Arial';
+    const labelX = region.devErrorX !== undefined ? region.devErrorX : Math.round(region.designCorrectX! * scaleX);
+    const labelY = region.devErrorY !== undefined ? region.devErrorY : Math.round(region.designCorrectY! * scaleY);
+    ctx.fillText(`#${region.id.split('-')[1]}`, labelX + 5, labelY + 15);
   });
 
   return annotated.toDataURL('image/png');
@@ -272,9 +931,10 @@ export async function compareImages(
     const totalPixels = width * height;
     const diffPercentage = (diffPixels / totalPixels) * 100;
 
-    // 检测差异区域
-    const minRegionSize = ignoreAntialiasing ? 50 : 10;
-    const diffRegions = findConnectedRegions(diffMap, width, height, minRegionSize);
+    // 检测差异区域（传递 canvas 参数）
+    // 增大最小区域尺寸阈值，从50提高到100，过滤掉更小的差异
+    const minRegionSize = ignoreAntialiasing ? 100 : 20;
+    const diffRegions = findConnectedRegions(diffMap, width, height, resized1, resized2, minRegionSize);
 
     // 按严重程度排序
     diffRegions.sort((a, b) => {
@@ -296,7 +956,7 @@ export async function compareImages(
 }
 
 /**
- * 生成带标注的对比图
+ * 生成带标注的对比图（双框对比效果）
  */
 export async function generateAnnotatedComparison(
   designImageSrc: string,
@@ -308,11 +968,12 @@ export async function generateAnnotatedComparison(
     // 获取差异结果
     const diffResult = await compareImages(designImageSrc, devImageSrc, threshold, ignoreAntialiasing);
 
-    // 加载开发侧图片用于标注
+    // 加载设计稿和开发稿图片
+    const designCanvas = await loadImageToCanvas(designImageSrc);
     const devCanvas = await loadImageToCanvas(devImageSrc);
 
-    // 生成标注图
-    const annotatedImage = generateAnnotatedImage(devCanvas, diffResult.diffRegions);
+    // 生成双框对比标注图
+    const annotatedImage = generateAnnotatedImage(designCanvas, devCanvas, diffResult.diffRegions);
 
     return annotatedImage;
   } catch (error) {

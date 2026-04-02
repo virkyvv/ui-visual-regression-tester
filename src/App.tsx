@@ -13,6 +13,7 @@ import { compareImages, generateAnnotatedComparison, matchImagePairs } from './l
 import type { TestTask, TaskStatus, ComparisonMode, TaskMode, BatchSubTask } from './types';
 import { ChevronDownIcon } from './icons/ChevronDownIcon';
 import { ChevronUpIcon } from './icons/ChevronUpIcon';
+import { InteractiveAnnotation } from './components/InteractiveAnnotation';
 
 function AppContent() {
   const { tasks, addTask, updateTask, deleteTask } = useTasks();
@@ -1566,9 +1567,9 @@ function AppContent() {
                               </div>
                             </div>
 
-                            {/* 差异标注图 */}
+                            {/* 差异标注图（交互式） */}
                             <div className="space-y-2">
-                              <h4 className="text-sm font-medium text-slate-700">差异标注</h4>
+                              <h4 className="text-sm font-medium text-slate-700">差异标注（点击框线查看详情）</h4>
                               <div 
                                 id={`diff-scroll-${task.id}`}
                                 className="max-h-[400px] overflow-y-auto rounded-lg border border-slate-200"
@@ -1587,10 +1588,9 @@ function AppContent() {
                                   }
                                 }}
                               >
-                                <img
-                                  src={task.result.annotatedImage}
-                                  alt="差异标注"
-                                  className="max-w-full object-contain"
+                                <InteractiveAnnotation
+                                  imageSrc={task.result.annotatedImage}
+                                  regions={task.result.pixelDiff.diffRegions}
                                 />
                               </div>
                             </div>
@@ -1625,24 +1625,87 @@ function AppContent() {
                           {task.result.pixelDiff.diffRegions.length === 0 ? (
                             <p className="text-green-600">✅ 未检测到差异，UI 还原度完美！</p>
                           ) : expandedDiffListTaskIds.has(task.id) ? (
-                            <div className="space-y-2">
-                              {task.result.pixelDiff.diffRegions.map((region: any) => (
-                                <div
-                                  key={region.id}
-                                  className="flex items-center justify-between p-3 border border-slate-200 rounded-lg"
-                                >
-                                  <div>
-                                    <span className="font-medium">位置: ({region.x}, {region.y})</span>
-                                    <span className="text-slate-600 ml-2">
-                                      尺寸: {region.width}x{region.height}
-                                    </span>
-                                    <span className="text-slate-600 ml-2">
-                                      影响面积: {region.affectedAreaPercentage.toFixed(2)}%
-                                    </span>
+                            <div className="space-y-3">
+                              {task.result.pixelDiff.diffRegions.map((region: any) => {
+                                // 获取问题类型的中文显示
+                                const typeNames: Record<string, string> = {
+                                  spacing: '间距异常',
+                                  fontSize: '字号不符',
+                                  color: '颜色偏差',
+                                  borderRadius: '圆角错误',
+                                  layout: '布局问题',
+                                  alignment: '对齐问题',
+                                  size: '尺寸问题',
+                                  other: '其他问题'
+                                };
+                                const typeName = typeNames[region.type] || region.type;
+                                
+                                // 获取问题类型颜色
+                                const typeColors: Record<string, string> = {
+                                  spacing: '#F59E0B',
+                                  fontSize: '#8B5CF6',
+                                  color: '#EC4899',
+                                  borderRadius: '#06B6D4',
+                                  layout: '#EF4444',
+                                  alignment: '#10B981',
+                                  size: '#F97316',
+                                  other: '#6B7280'
+                                };
+                                const typeColor = typeColors[region.type] || '#6B7280';
+                                
+                                return (
+                                  <div
+                                    key={region.id}
+                                    className="p-4 border border-slate-200 rounded-lg hover:border-slate-300 transition-colors"
+                                  >
+                                    {/* 问题类型标题 */}
+                                    <div className="flex items-center justify-between mb-3 pb-2 border-b">
+                                      <div className="flex items-center gap-2">
+                                        <div
+                                          className="w-3 h-3 rounded-full"
+                                          style={{ backgroundColor: typeColor }}
+                                        />
+                                        <span className="font-semibold" style={{ color: typeColor }}>
+                                          {typeName}
+                                        </span>
+                                        <span className="text-xs text-slate-500">
+                                          #{region.id.split('-')[1]}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        {getSeverityBadge(region.severity)}
+                                        <span className="text-xs text-slate-500">
+                                          置信度: {(region.confidence * 100).toFixed(0)}%
+                                        </span>
+                                      </div>
+                                    </div>
+                                    
+                                    {/* 详细信息网格 */}
+                                    <div className="grid grid-cols-2 gap-3 text-sm">
+                                      <div>
+                                        <span className="text-slate-600">位置:</span>
+                                        <span className="ml-2 font-medium">{region.position}</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-slate-600">影响面积:</span>
+                                        <span className="ml-2 font-medium">{region.affectedAreaPercentage.toFixed(2)}%</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-slate-600">预期值:</span>
+                                        <span className="ml-2 font-medium text-green-600">{region.expectedValue}</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-slate-600">实际值:</span>
+                                        <span className="ml-2 font-medium text-red-600">{region.actualValue}</span>
+                                      </div>
+                                      <div className="col-span-2">
+                                        <span className="text-slate-600">偏差描述:</span>
+                                        <span className="ml-2 font-medium">{region.deviation}</span>
+                                      </div>
+                                    </div>
                                   </div>
-                                  {getSeverityBadge(region.severity)}
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           ) : (
                             <p className="text-slate-600 text-sm">点击"展开列表"查看 {task.result.pixelDiff.diffRegions.length} 个差异区域的详细信息</p>
@@ -1798,10 +1861,9 @@ function AppContent() {
                                                 }
                                               }}
                                             >
-                                              <img
-                                                src={subTask.result.annotatedImage}
-                                                alt="差异标注"
-                                                className="max-w-full object-contain"
+                                              <InteractiveAnnotation
+                                                imageSrc={subTask.result.annotatedImage}
+                                                regions={subTask.result.pixelDiff.diffRegions}
                                               />
                                             </div>
                                           </div>
