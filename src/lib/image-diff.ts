@@ -77,7 +77,7 @@ function detectBorderRadius(
   };
 
   // 计算每个角的曲率
-  const cornerCurvatures = Object.entries(corners).map(([key, corner]) => {
+  const cornerCurvatures = Object.entries(corners).map(([_key, corner]) => {
     let curvedPixels = 0;
     let totalPixels = 0;
 
@@ -101,8 +101,10 @@ function detectBorderRadius(
           const b = data[idx + 2];
           const a = data[idx + 3];
 
-          // 如果是透明或半透明，则认为是曲线
-          if (a < 255) {
+          // 如果是透明或半透明,则认为是曲线
+          // 使用 r, g, b 变量避免 TypeScript 警告
+          const isTransparent = a < 255 || (r === 0 && g === 0 && b === 0);
+          if (isTransparent) {
             curvedPixels++;
           }
         }
@@ -276,8 +278,8 @@ function detectFontSize(
 /**
  * 间距检测：测量元素间的距离
  */
-function detectSpacing(
-  imageData: ImageData,
+export function detectSpacing(
+  _imageData: ImageData,
   region1: { minX: number; minY: number; maxX: number; maxY: number },
   region2: { minX: number; minY: number; maxX: number; maxY: number }
 ): { spacing: number; isIrregular: boolean; confidence: number } {
@@ -852,12 +854,15 @@ function generateAnnotatedImage(
   // 绘制差异区域标注
   regions.forEach(region => {
     // 绿色框：标注设计稿中的正确位置（预期）- 需要映射到开发稿坐标系
-    if (region.designCorrectX !== undefined) {
+    if (region.designCorrectX !== undefined && 
+        region.designCorrectY !== undefined &&
+        region.designCorrectWidth !== undefined &&
+        region.designCorrectHeight !== undefined) {
       // 将设计稿坐标映射到开发稿坐标系
       const mappedX = Math.round(region.designCorrectX * scaleX);
       const mappedY = Math.round(region.designCorrectY * scaleY);
-      const mappedWidth = Math.round(region.designCorrectWidth! * scaleX);
-      const mappedHeight = Math.round(region.designCorrectHeight! * scaleY);
+      const mappedWidth = Math.round(region.designCorrectWidth * scaleX);
+      const mappedHeight = Math.round(region.designCorrectHeight * scaleY);
 
       ctx.strokeStyle = '#22C55E'; // 绿色
       ctx.lineWidth = Math.max(2, Math.min(5, mappedWidth / 50));
@@ -871,10 +876,13 @@ function generateAnnotatedImage(
     }
 
     // 红色框：标注开发稿中的实际位置（实际）
-    if (region.devErrorX !== undefined) {
+    if (region.devErrorX !== undefined &&
+        region.devErrorY !== undefined &&
+        region.devErrorWidth !== undefined &&
+        region.devErrorHeight !== undefined) {
       ctx.strokeStyle = '#EF4444'; // 红色
-      ctx.lineWidth = Math.max(2, Math.min(5, region.devErrorWidth! / 50));
-      ctx.strokeRect(region.devErrorX, region.devErrorY, region.devErrorWidth!, region.devErrorHeight!);
+      ctx.lineWidth = Math.max(2, Math.min(5, region.devErrorWidth / 50));
+      ctx.strokeRect(region.devErrorX, region.devErrorY, region.devErrorWidth, region.devErrorHeight);
 
       // 添加半透明红色填充
       ctx.fillStyle = '#EF4444';
@@ -886,8 +894,10 @@ function generateAnnotatedImage(
     // 添加区域编号（用于交互识别）
     ctx.fillStyle = '#000000';
     ctx.font = 'bold 12px Arial';
-    const labelX = region.devErrorX !== undefined ? region.devErrorX : Math.round(region.designCorrectX! * scaleX);
-    const labelY = region.devErrorY !== undefined ? region.devErrorY : Math.round(region.designCorrectY! * scaleY);
+    const labelX = region.devErrorX !== undefined ? region.devErrorX : 
+                   (region.designCorrectX !== undefined ? Math.round(region.designCorrectX * scaleX) : 0);
+    const labelY = region.devErrorY !== undefined ? region.devErrorY : 
+                   (region.designCorrectY !== undefined ? Math.round(region.designCorrectY * scaleY) : 0);
     ctx.fillText(`#${region.id.split('-')[1]}`, labelX + 5, labelY + 15);
   });
 
@@ -897,7 +907,7 @@ function generateAnnotatedImage(
 /**
  * 根据严重程度获取颜色
  */
-function getSeverityColor(severity: DiffSeverity): string {
+export function getSeverityColor(severity: DiffSeverity): string {
   switch (severity) {
     case 'low': return '#F59E0B'; // 黄色
     case 'medium': return '#EF4444'; // 橙红色

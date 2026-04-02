@@ -129,19 +129,25 @@ export function InteractiveAnnotation({ imageSrc, regions }: InteractiveAnnotati
         const canvasHeight = region.canvasHeight || imageDimensions.height;
         
         // 绿色框：设计稿正确位置（预期）
-        const designBox = region.designCorrectX !== undefined ? {
+        const designBox = region.designCorrectX !== undefined && 
+                          region.designCorrectY !== undefined &&
+                          region.designCorrectWidth !== undefined &&
+                          region.designCorrectHeight !== undefined ? {
           left: (region.designCorrectX / canvasWidth) * 100,
-          top: (region.designCorrectY / (canvasHeight || 1)) * 100,
-          width: (region.designCorrectWidth! / canvasWidth) * 100,
-          height: (region.designCorrectHeight! / (canvasHeight || 1)) * 100
+          top: (region.designCorrectY / canvasHeight) * 100,
+          width: (region.designCorrectWidth / canvasWidth) * 100,
+          height: (region.designCorrectHeight / canvasHeight) * 100
         } : null;
         
         // 红色框：开发稿实际位置（实际）
-        const devBox = region.devErrorX !== undefined ? {
+        const devBox = region.devErrorX !== undefined &&
+                       region.devErrorY !== undefined &&
+                       region.devErrorWidth !== undefined &&
+                       region.devErrorHeight !== undefined ? {
           left: (region.devErrorX / canvasWidth) * 100,
-          top: (region.devErrorY / (canvasHeight || 1)) * 100,
-          width: (region.devErrorWidth! / canvasWidth) * 100,
-          height: (region.devErrorHeight! / (canvasHeight || 1)) * 100
+          top: (region.devErrorY / canvasHeight) * 100,
+          width: (region.devErrorWidth / canvasWidth) * 100,
+          height: (region.devErrorHeight / canvasHeight) * 100
         } : null;
         
         return (
