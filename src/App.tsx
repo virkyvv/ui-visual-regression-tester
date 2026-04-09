@@ -838,16 +838,6 @@ function AppContent() {
     return <Badge className={color}>{label}</Badge>;
   };
 
-  const getSeverityBadge = (severity: string) => {
-    const severityMap = {
-      low: { label: '低', color: 'bg-yellow-500' },
-      medium: { label: '中', color: 'bg-orange-500' },
-      high: { label: '高', color: 'bg-red-500' }
-    };
-    const { label, color } = severityMap[severity as keyof typeof severityMap] || severityMap.low;
-    return <Badge className={color}>{label}</Badge>;
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
       <header className="bg-white border-b border-slate-200 shadow-sm">

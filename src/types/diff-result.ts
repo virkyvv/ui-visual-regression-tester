@@ -30,6 +30,19 @@ export type DiffType =
   | 'size'         // 尺寸问题
   | 'other';       // 其他问题
 
+// 组件类型枚举
+export type ComponentType = 
+  | 'text'         // 文字
+  | 'button'       // 按钮
+  | 'image'        // 图片
+  | 'container'    // 容器
+  | 'icon'         // 图标
+  | 'rect-block'   // 矩形块
+  | 'other';       // 其他
+
+// 方向类型（中文）
+export type Direction = '上' | '下' | '左' | '右';
+
 export interface DiffRegion {
   id: string;
   x: number;
@@ -47,6 +60,19 @@ export interface DiffRegion {
   actualValue: string;                     // 实际值（前端实现的实际参数）
   deviation: string;                       // 偏差描述
   confidence: number;                      // 置信度（0-1）
+  
+  // 规范化的新字段
+  componentType?: ComponentType;             // 组件类型
+  componentId?: string;                      // 组件ID
+  direction?: Direction;                     // 偏移方向
+  pixelValue?: number;                       // 像素值
+  designColor?: string;                      // 设计稿颜色（十六进制）
+  devColor?: string;                         // 开发稿颜色（十六进制）
+  designSize?: { width: number; height: number };  // 设计尺寸
+  devSize?: { width: number; height: number };     // 开发尺寸
+  sizeType?: '宽' | '高' | '宽高';           // 尺寸类型
+  designFont?: string;                       // 设计字体
+  devFont?: string;                          // 开发字体
   
   // 设计稿中的正确位置（用于绿色框标注）
   designCorrectX?: number;

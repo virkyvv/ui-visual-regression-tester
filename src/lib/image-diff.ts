@@ -794,7 +794,6 @@ function findConnectedRegions(
             confidence: typeInfo.confidence,
             componentType: typeInfo.componentType,
             componentId: typeInfo.componentId,
-            status: 'pending',
             direction: typeInfo.direction,
             pixelValue: typeInfo.pixelValue,
             designColor: typeInfo.designColor,
