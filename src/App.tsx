@@ -428,6 +428,116 @@ function AppContent() {
     deleteTask(taskId);
   };
 
+  const ISSUE_STATUS_LABELS: Record<string, string> = {
+    pending: '待确认',
+    confirmed: '已确认',
+    ignored: '已忽略'
+  };
+
+  const COMPONENT_TYPE_LABELS: Record<string, string> = {
+    text: '文字',
+    button: '按钮',
+    'rect-block': '矩形色块',
+    image: '图片',
+    input: '输入框/选择器'
+  };
+
+  const DIFF_TYPE_LABELS: Record<string, string> = {
+    spacing: '间距异常',
+    fontSize: '字号不符',
+    color: '颜色偏差',
+    borderRadius: '圆角错误',
+    layout: '布局问题',
+    alignment: '对齐问题',
+    size: '尺寸问题',
+    other: '其他问题'
+  };
+
+  const formatIssueDescription = (region: any): string => {
+    switch (region.type) {
+      case 'layout':
+      case 'alignment':
+      case 'spacing': {
+        if (region.direction && region.pixelValue) {
+          return `文字位置偏移，向${region.direction}偏移约${region.pixelValue}px`;
+        }
+        return region.deviation || '布局位置与设计稿不一致';
+      }
+      case 'color': {
+        if (region.devColor && region.designColor) {
+          return `组件颜色不一致，开发稿中为${region.devColor}，设计稿中为${region.designColor}`;
+        }
+        return region.deviation || '组件颜色与设计稿不一致';
+      }
+      case 'size': {
+        if (region.designSize && region.devSize) {
+          const sizeInfo = region.sizeType === '宽'
+            ? `开发稿宽为${region.devSize.width}px，设计稿宽为${region.designSize.width}px`
+            : region.sizeType === '高'
+              ? `开发稿高为${region.devSize.height}px，设计稿高为${region.designSize.height}px`
+              : `开发稿宽为${region.devSize.width}px、高为${region.devSize.height}px，设计稿宽为${region.designSize.width}px、高为${region.designSize.height}px`;
+          return `组件尺寸不一致，${sizeInfo}`;
+        }
+        return region.deviation || '组件尺寸与设计稿不一致';
+      }
+      case 'fontSize': {
+        if (region.designFont && region.devFont) {
+          return `文字相对设计稿字体不一致，开发稿中为${region.devFont}，设计稿中为${region.designFont}`;
+        }
+        return region.deviation || '文字字体与设计稿不一致';
+      }
+      case 'borderRadius': {
+        return region.deviation || '组件圆角与设计稿不一致';
+      }
+      default:
+        return region.deviation || '检测到组件与设计稿存在差异';
+    }
+  };
+
+  const formatFixSuggestion = (region: any): string => {
+    switch (region.type) {
+      case 'layout':
+      case 'alignment':
+      case 'spacing': {
+        if (region.direction && region.pixelValue) {
+          return `需要向${region.direction}移动约${region.pixelValue}px`;
+        }
+        return '需要调整组件位置至设计稿位置';
+      }
+      case 'color': {
+        if (region.designColor) {
+          return `需要将颜色修改为设计稿的${region.designColor}`;
+        }
+        return '需要将组件颜色调整为与设计稿一致';
+      }
+      case 'size': {
+        if (region.designSize && region.devSize) {
+          const widthDiff = Math.abs(region.designSize.width - region.devSize.width);
+          const heightDiff = Math.abs(region.designSize.height - region.devSize.height);
+          if (region.sizeType === '宽') {
+            return `需要将宽调整约${widthDiff}px至设计稿尺寸`;
+          }
+          if (region.sizeType === '高') {
+            return `需要将高调整约${heightDiff}px至设计稿尺寸`;
+          }
+          return `需要将宽调整约${widthDiff}px、高调整约${heightDiff}px至设计稿尺寸`;
+        }
+        return '需要将组件尺寸调整至设计稿尺寸';
+      }
+      case 'fontSize': {
+        if (region.designFont) {
+          return `需要将字体修改为${region.designFont}`;
+        }
+        return '需要将字体调整为设计稿字体';
+      }
+      case 'borderRadius': {
+        return '需要将圆角调整为设计稿圆角';
+      }
+      default:
+        return '需要根据设计稿调整该组件';
+    }
+  };
+
   const handleCreateTask = async () => {
     if (!taskName || !designImage || !devImage) {
       setErrorMessage('请填写任务名称并上传两张图片');
@@ -1626,86 +1736,41 @@ function AppContent() {
                             <p className="text-green-600">✅ 未检测到差异，UI 还原度完美！</p>
                           ) : expandedDiffListTaskIds.has(task.id) ? (
                             <div className="space-y-3">
-                              {task.result.pixelDiff.diffRegions.map((region: any) => {
-                                // 获取问题类型的中文显示
-                                const typeNames: Record<string, string> = {
-                                  spacing: '间距异常',
-                                  fontSize: '字号不符',
-                                  color: '颜色偏差',
-                                  borderRadius: '圆角错误',
-                                  layout: '布局问题',
-                                  alignment: '对齐问题',
-                                  size: '尺寸问题',
-                                  other: '其他问题'
-                                };
-                                const typeName = typeNames[region.type] || region.type;
-                                
-                                // 获取问题类型颜色
-                                const typeColors: Record<string, string> = {
-                                  spacing: '#F59E0B',
-                                  fontSize: '#8B5CF6',
-                                  color: '#EC4899',
-                                  borderRadius: '#06B6D4',
-                                  layout: '#EF4444',
-                                  alignment: '#10B981',
-                                  size: '#F97316',
-                                  other: '#6B7280'
-                                };
-                                const typeColor = typeColors[region.type] || '#6B7280';
-                                
-                                return (
-                                  <div
-                                    key={region.id}
-                                    className="p-4 border border-slate-200 rounded-lg hover:border-slate-300 transition-colors"
-                                  >
-                                    {/* 问题类型标题 */}
-                                    <div className="flex items-center justify-between mb-3 pb-2 border-b">
-                                      <div className="flex items-center gap-2">
-                                        <div
-                                          className="w-3 h-3 rounded-full"
-                                          style={{ backgroundColor: typeColor }}
-                                        />
-                                        <span className="font-semibold" style={{ color: typeColor }}>
-                                          {typeName}
-                                        </span>
-                                        <span className="text-xs text-slate-500">
-                                          #{region.id.split('-')[1]}
-                                        </span>
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        {getSeverityBadge(region.severity)}
-                                        <span className="text-xs text-slate-500">
-                                          置信度: {(region.confidence * 100).toFixed(0)}%
-                                        </span>
+                              {task.result.pixelDiff.diffRegions.map((region: any) => (
+                                <div
+                                  key={region.id}
+                                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm"
+                                >
+                                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div className="min-w-0">
+                                      <div className="text-xs text-slate-500 mb-2">### {region.id}</div>
+                                      <div className="flex flex-wrap gap-2 items-center text-sm">
+                                        <span className="font-medium text-slate-900">{DIFF_TYPE_LABELS[region.type] || region.type}</span>
+                                        <span className="text-xs text-slate-500">`{COMPONENT_TYPE_LABELS[region.componentType] || '组件'}：{region.componentId}`</span>
+                                        <span className="text-xs text-slate-500">`{ISSUE_STATUS_LABELS[region.status || 'pending']}`</span>
                                       </div>
                                     </div>
-                                    
-                                    {/* 详细信息网格 */}
-                                    <div className="grid grid-cols-2 gap-3 text-sm">
-                                      <div>
-                                        <span className="text-slate-600">位置:</span>
-                                        <span className="ml-2 font-medium">{region.position}</span>
-                                      </div>
-                                      <div>
-                                        <span className="text-slate-600">影响面积:</span>
-                                        <span className="ml-2 font-medium">{region.affectedAreaPercentage.toFixed(2)}%</span>
-                                      </div>
-                                      <div>
-                                        <span className="text-slate-600">预期值:</span>
-                                        <span className="ml-2 font-medium text-green-600">{region.expectedValue}</span>
-                                      </div>
-                                      <div>
-                                        <span className="text-slate-600">实际值:</span>
-                                        <span className="ml-2 font-medium text-red-600">{region.actualValue}</span>
-                                      </div>
-                                      <div className="col-span-2">
-                                        <span className="text-slate-600">偏差描述:</span>
-                                        <span className="ml-2 font-medium">{region.deviation}</span>
-                                      </div>
+                                    <span className="text-xs text-slate-400">置信度：{Math.round((region.confidence ?? 0) * 100)}%</span>
+                                  </div>
+
+                                  <div className="mt-4 space-y-4 text-sm text-slate-700">
+                                    <div>
+                                      <div className="text-xs text-slate-500 mb-1">差异描述：</div>
+                                      <div className="text-sm text-slate-800">{formatIssueDescription(region)}</div>
+                                    </div>
+                                    <div>
+                                      <div className="text-xs text-slate-500 mb-1">修复建议：</div>
+                                      <div className="text-sm text-slate-800">{formatFixSuggestion(region)}</div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3 text-xs text-slate-500">
+                                      <div>位置：{region.position}</div>
+                                      <div>差异像素：{region.diffPixels}</div>
+                                      <div>差异率：{region.affectedAreaPercentage.toFixed(2)}%</div>
+                                      <div>类型：{DIFF_TYPE_LABELS[region.type] || region.type}</div>
                                     </div>
                                   </div>
-                                );
-                              })}
+                                </div>
+                              ))}
                             </div>
                           ) : (
                             <p className="text-slate-600 text-sm">点击"展开列表"查看 {task.result.pixelDiff.diffRegions.length} 个差异区域的详细信息</p>

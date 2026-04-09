@@ -1,5 +1,5 @@
 // 图像对比核心算法
-import type { PixelDiffResult, DiffRegion, DiffSeverity, DiffType } from '@/types';
+import type { PixelDiffResult, DiffRegion, DiffSeverity, DiffType, ComponentType } from '@/types';
 
 /**
  * 加载图片到 Canvas
@@ -385,6 +385,50 @@ function calculateElementBounds(
 /**
  * 分析差异区域的问题类型（基于新的五维检测方法）
  */
+function rgbToHex(color: { r: number; g: number; b: number }): string {
+  const toHex = (value: number) => value.toString(16).padStart(2, '0');
+  return `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`.toUpperCase();
+}
+
+function inferDirectionAndPixelValue(
+  region: { minX: number; minY: number; maxX: number; maxY: number },
+  canvas: HTMLCanvasElement
+): { direction: '上' | '下' | '左' | '右'; pixelValue: number } {
+  const centerX = (region.minX + region.maxX) / 2;
+  const centerY = (region.minY + region.maxY) / 2;
+  const horizontal = centerX >= canvas.width / 2;
+  const vertical = centerY >= canvas.height / 2;
+
+  const direction = horizontal ? '右' : '左';
+  const secondDirection = vertical ? '下' : '上';
+  const pixelValue = Math.max(region.maxX - region.minX, region.maxY - region.minY);
+
+  return {
+    direction: Math.abs(centerX - canvas.width / 2) > Math.abs(centerY - canvas.height / 2)
+      ? direction
+      : secondDirection,
+    pixelValue: Math.max(5, Math.round(pixelValue * 0.2))
+  };
+}
+
+function getComponentTypeForRegion(
+  type: string,
+  fontSize1: { hasText: boolean },
+  fontSize2: { hasText: boolean }
+): ComponentType {
+  if (type === 'fontSize' || fontSize1.hasText || fontSize2.hasText) {
+    return 'text';
+  }
+  if (type === 'color' || type === 'borderRadius' || type === 'layout' || type === 'alignment' || type === 'spacing') {
+    return 'rect-block';
+  }
+  return 'rect-block';
+}
+
+function getComponentIdForRegion(region: { minX: number; minY: number; maxX: number; maxY: number }): string {
+  return `差异区域 ${region.minX}-${region.minY}`;
+}
+
 function classifyDiffType(
   canvas1: HTMLCanvasElement,
   canvas2: HTMLCanvasElement,
@@ -395,6 +439,17 @@ function classifyDiffType(
   actualValue: string;
   deviation: string;
   confidence: number;
+  componentType: ComponentType;
+  componentId: string;
+  direction?: '上' | '下' | '左' | '右';
+  pixelValue?: number;
+  designColor?: string;
+  devColor?: string;
+  designSize?: { width: number; height: number };
+  devSize?: { width: number; height: number };
+  sizeType?: '宽' | '高' | '宽高';
+  designFont?: string;
+  devFont?: string;
 } {
   const ctx1 = canvas1.getContext('2d');
   const ctx2 = canvas2.getContext('2d');
@@ -407,36 +462,23 @@ function classifyDiffType(
   const imageData1 = ctx1.getImageData(region.minX, region.minY, width, height);
   const imageData2 = ctx2.getImageData(region.minX, region.minY, width, height);
 
-  // 1. 圆角检测
   const borderRadius1 = detectBorderRadius(imageData1, region);
   const borderRadius2 = detectBorderRadius(imageData2, region);
-
-  // 2. 颜色检测
   const colorDiff = detectColorDifference(canvas1, canvas2, region);
-
-  // 3. 字号检测
   const fontSize1 = detectFontSize(canvas1, region);
   const fontSize2 = detectFontSize(canvas2, region);
-
-  // 4. 间距检测（需要两个区域，这里简化处理）
-  // 间距检测需要先识别相邻的元素，这里暂时跳过
-
-  // 5. 尺寸检测
   const sizeDiff = detectSizeDifference(canvas1, canvas2, region);
 
-  // 综合判断差异类型
-  const detections: Array<{ type: string; confidence: number; description: string }> = [];
+  const detections: Array<{ type: DiffType; confidence: number; description: string }> = [];
 
-  // 颜色差异
   if (colorDiff.hasSignificantDifference && colorDiff.confidence > 0.5) {
     detections.push({
       type: 'color',
       confidence: colorDiff.confidence,
-      description: `颜色差异：rgb(${colorDiff.dominantColor1.r},${colorDiff.dominantColor1.g},${colorDiff.dominantColor1.b}) → rgb(${colorDiff.dominantColor2.r},${colorDiff.dominantColor2.g},${colorDiff.dominantColor2.b})`
+      description: `颜色差异：${rgbToHex(colorDiff.dominantColor1)} → ${rgbToHex(colorDiff.dominantColor2)}`
     });
   }
 
-  // 尺寸差异
   if (sizeDiff.hasSignificantDifference && sizeDiff.confidence > 0.5) {
     detections.push({
       type: 'size',
@@ -445,25 +487,22 @@ function classifyDiffType(
     });
   }
 
-  // 圆角差异
   if (borderRadius1.hasBorderRadius !== borderRadius2.hasBorderRadius) {
     detections.push({
-      type: 'border-radius',
+      type: 'borderRadius',
       confidence: Math.max(borderRadius1.confidence, borderRadius2.confidence),
       description: `圆角差异：${borderRadius1.hasBorderRadius ? `${borderRadius1.estimatedRadius}px` : '无'} → ${borderRadius2.hasBorderRadius ? `${borderRadius2.estimatedRadius}px` : '无'}`
     });
   }
 
-  // 字号差异
   if (fontSize1.hasText && fontSize2.hasText && Math.abs(fontSize1.estimatedFontSize - fontSize2.estimatedFontSize) > 2) {
     detections.push({
-      type: 'font-size',
+      type: 'fontSize',
       confidence: Math.max(fontSize1.confidence, fontSize2.confidence),
       description: `字号差异：${fontSize1.estimatedFontSize}px → ${fontSize2.estimatedFontSize}px`
     });
   }
 
-  // 如果没有检测到明显差异，判断为间距问题（基于长宽比）
   if (detections.length === 0) {
     const aspectRatio = width / height;
     if (aspectRatio > 5 || aspectRatio < 0.2) {
@@ -481,17 +520,40 @@ function classifyDiffType(
     }
   }
 
-  // 选择置信度最高的检测结果
   const bestDetection = detections.reduce((best, current) =>
     current.confidence > best.confidence ? current : best
   );
 
+  const { direction, pixelValue } = inferDirectionAndPixelValue(region, canvas1);
+  const componentType = getComponentTypeForRegion(bestDetection.type, fontSize1, fontSize2);
+
+  const sizeType: '宽' | '高' | '宽高' = sizeDiff.widthDiff > 0 && sizeDiff.heightDiff === 0
+    ? '宽'
+    : sizeDiff.heightDiff > 0 && sizeDiff.widthDiff === 0
+      ? '高'
+      : '宽高';
+
   return {
-    type: bestDetection.type as any,
+    type: bestDetection.type,
     expectedValue: bestDetection.description,
     actualValue: '实际实现值',
     deviation: bestDetection.description,
-    confidence: bestDetection.confidence
+    confidence: bestDetection.confidence,
+    componentType,
+    componentId: getComponentIdForRegion(region),
+    direction: bestDetection.type === 'layout' || bestDetection.type === 'alignment' || bestDetection.type === 'spacing'
+      ? direction
+      : undefined,
+    pixelValue: bestDetection.type === 'layout' || bestDetection.type === 'alignment' || bestDetection.type === 'spacing'
+      ? pixelValue
+      : undefined,
+    designColor: colorDiff.hasSignificantDifference ? rgbToHex(colorDiff.dominantColor1) : undefined,
+    devColor: colorDiff.hasSignificantDifference ? rgbToHex(colorDiff.dominantColor2) : undefined,
+    designSize: sizeDiff.hasSignificantDifference ? { width: sizeDiff.width1, height: sizeDiff.height1 } : undefined,
+    devSize: sizeDiff.hasSignificantDifference ? { width: sizeDiff.width2, height: sizeDiff.height2 } : undefined,
+    sizeType: sizeDiff.hasSignificantDifference ? sizeType : undefined,
+    designFont: fontSize1.hasText ? `约 ${fontSize1.estimatedFontSize}px 字号` : undefined,
+    devFont: fontSize2.hasText ? `约 ${fontSize2.estimatedFontSize}px 字号` : undefined
   };
 }
 
@@ -730,6 +792,18 @@ function findConnectedRegions(
             actualValue: typeInfo.actualValue,
             deviation: typeInfo.deviation,
             confidence: typeInfo.confidence,
+            componentType: typeInfo.componentType,
+            componentId: typeInfo.componentId,
+            status: 'pending',
+            direction: typeInfo.direction,
+            pixelValue: typeInfo.pixelValue,
+            designColor: typeInfo.designColor,
+            devColor: typeInfo.devColor,
+            designSize: typeInfo.designSize,
+            devSize: typeInfo.devSize,
+            sizeType: typeInfo.sizeType,
+            designFont: typeInfo.designFont,
+            devFont: typeInfo.devFont,
 
             // 设计稿中的正确位置（绿色框）- 使用原始 Canvas 坐标
             designCorrectX,
